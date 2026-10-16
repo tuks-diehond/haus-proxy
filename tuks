@@ -1,0 +1,64 @@
+api/decorate.js
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'POST only' });
+  }
+
+  try {
+    const { image, prompt, isEmpty } = req.body;
+
+    if (!image || !prompt) {
+      return res.status(400).json({ error: 'Missing image or prompt' });
+    }
+
+    // Convert base64 dataURL to buffer
+    const base64Data = image.includes(',') ? image.split(',')[1] : image;
+    const buffer = Buffer.from(base64Data, 'base64');
+    const blob = new Blob([buffer], { type: 'image/jpeg' });
+
+    const formData = new FormData();
+    formData.append('image', blob, 'room.jpg');
+    
+    const fullPrompt = prompt + (isEmpty 
+      ? ', empty room to fully furnished, keep exact walls windows ceiling floor layout unchanged, photorealistic interior design, 8k, add sofa, table, rug, plants'
+      : ', interior design makeover, preserve exact room structure, keep same walls windows doors floor, high quality photorealistic, 8k');
+    
+    formData.append('prompt', fullPrompt);
+    formData.append('control_strength', '0.7');
+    formData.append('output_format', 'webp');
+
+    const stabilityResponse = await fetch('https://api.stability.ai/v2beta/stable-image/control/structure', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.STABILITY_KEY}`,
+      },
+      body: formData
+    });
+
+    if (!stabilityResponse.ok) {
+      const errorText = await stabilityResponse.text();
+      console.error('Stability error:', errorText);
+      return res.status(500).json({ error: errorText });
+    }
+
+    const arrayBuffer = await stabilityResponse.arrayBuffer();
+    const base64Image = Buffer.from(arrayBuffer).toString('base64');
+    
+    return res.status(200).json({ 
+      image: `data:image/webp;base64,${base64Image}`,
+      success: true 
+    });
+
+  } catch (error) {
+    console.error('Proxy error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+}
